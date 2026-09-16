@@ -30,7 +30,7 @@ def answer_tutor(req: TutorRequest, provider=None, model: str = CHAT_MODEL_DEFAU
     )
     history = "\n".join(f"{t.role}: {t.content}" for t in req.conversation_history[-10:])
     user = f"Sources:\n{context}\n\nConversation:\n{history}\n\nQuestion: {req.user_query}"
-    text, tokens = prov.chat(system=_SYSTEM, user=user, model=model, timeout_s=30, max_tokens=800)
+    text, tokens = prov.chat(system=_SYSTEM, user=user, model=model, timeout_s=30, max_tokens=2000)
     return TutorResponse(
         response_text=text,
         source_chunk_ids=_extract_cited_ids(text, [c.chunk_id for c in req.retrieved_chunks]),

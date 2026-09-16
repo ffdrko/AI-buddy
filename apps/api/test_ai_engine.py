@@ -181,6 +181,26 @@ def test_timeout_never_blocks():
     assert time.time() - t0 < 8
 
 
+def test_message_text_reasoning_fallback():
+    from app.ai.client import message_text
+
+    class ContentMsg:
+        content = "hello"
+        reasoning = "thinking"
+
+    class ReasonOnlyMsg:
+        content = None
+        reasoning = '{"grade": 0.9}'
+
+    class EmptyMsg:
+        content = None
+        reasoning = None
+
+    assert message_text(ContentMsg()) == "hello"
+    assert message_text(ReasonOnlyMsg()) == '{"grade": 0.9}'
+    assert message_text(EmptyMsg()) == ""
+
+
 def test_get_provider_resolution():
     assert get_provider("stub").name == "stub"
     os.environ["AI_ENGINE_PROVIDER"] = "stub"

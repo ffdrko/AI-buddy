@@ -32,7 +32,11 @@ def _openai_client():
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set")
-    return OpenAI(api_key=api_key)
+    kwargs: dict = {}
+    base_url = os.getenv("OPENAI_BASE_URL")  # e.g. https://openrouter.ai/api/v1
+    if base_url:
+        kwargs["base_url"] = base_url
+    return OpenAI(api_key=api_key, **kwargs)
 
 
 def _retry_with_backoff(fn, max_retries: int = EMBED_MAX_RETRIES):
@@ -64,7 +68,8 @@ def extract_concepts(chunk_content: str, model: str | None = None) -> list[Conce
             ],
             timeout=30,
         )
-        return resp.choices[0].message.content or ""
+        msg = resp.choices[0].message
+        return (getattr(msg, "content", None) or getattr(msg, "reasoning", None) or "")
 
     raw = _retry_with_backoff(_call)
     concepts: list[Concept] = []
@@ -140,6 +145,7 @@ def transcribe_page_image(image_png: bytes, page_no: int, model: str | None = No
             max_tokens=4000,
             timeout=90,
         )
-        return resp.choices[0].message.content or ""
+        msg = resp.choices[0].message
+        return (getattr(msg, "content", None) or getattr(msg, "reasoning", None) or "")
 
     return _retry_with_backoff(_call).strip()

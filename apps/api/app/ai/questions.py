@@ -34,7 +34,7 @@ def generate_question(req: GenerateQuestionRequest, provider=None, model: str = 
         f"Section: {req.section_heading or 'untitled'}\nConcepts: {concepts}\n"
         f"Type: {req.question_type}\nChunk:\n{req.chunk_content[:4000]}"
     )
-    text, tokens = prov.chat(system=_SYSTEM, user=user, model=model, timeout_s=30, max_tokens=600)
+    text, tokens = prov.chat(system=_SYSTEM, user=user, model=model, timeout_s=30, max_tokens=1500)
     return _parse_llm_output(req, text, model, tokens)
 
 

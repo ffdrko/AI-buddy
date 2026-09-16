@@ -41,7 +41,7 @@ def evaluate_answer(req: EvaluateRequest, threshold: float = 0.6, provider=None,
         f"Selected option: {req.selected_option_id}\nCorrect option: {req.correct_option_id}\n"
         f"Rubric:\n{rubric[:6000]}"
     )
-    text, tokens = prov.chat(system=_SYSTEM, user=user, model=model, timeout_s=30, max_tokens=500)
+    text, tokens = prov.chat(system=_SYSTEM, user=user, model=model, timeout_s=30, max_tokens=1500)
     try:
         data = json.loads(re.search(r"\{.*\}", text, re.DOTALL).group(0))  # type: ignore[union-attr]
         grade = min(1.0, max(0.0, float(data["grade"])))

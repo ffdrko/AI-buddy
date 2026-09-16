@@ -94,7 +94,7 @@ def _llm_plan(req: PlanRequest, prov, model: str) -> StudyPlan:
         f"Goal: {req.session_goal}\nAvailable minutes: {req.available_minutes}\n"
         f"Candidates: {req.chunk_ids}\nTopic state:\n{topics}\nChunk state:\n{chunks}"
     )
-    text, tokens = prov.chat(system=_SYSTEM, user=user, model=model, timeout_s=30, max_tokens=500)
+    text, tokens = prov.chat(system=_SYSTEM, user=user, model=model, timeout_s=30, max_tokens=1500)
     try:
         data = json.loads(re.search(r"\{.*\}", text, re.DOTALL).group(0))  # type: ignore[union-attr]
         return StudyPlan(

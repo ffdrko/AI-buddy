@@ -59,6 +59,11 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def message_text(msg) -> str:
+    """Reasoning-model aware: content first, reasoning fallback, else empty."""
+    return (getattr(msg, "content", None) or getattr(msg, "reasoning", None) or "").strip()
+
+
 class StubProvider:
     """Deterministic offline provider. Marks output so it is never billed as real."""
 
@@ -80,7 +85,11 @@ class OpenAIProvider:
         key = api_key or os.getenv("OPENAI_API_KEY")
         if not key:
             raise RuntimeError("OPENAI_API_KEY is not set")
-        self._client = OpenAI(api_key=key)
+        kwargs: dict = {}
+        base_url = os.getenv("OPENAI_BASE_URL")  # e.g. https://openrouter.ai/api/v1
+        if base_url:
+            kwargs["base_url"] = base_url
+        self._client = OpenAI(api_key=key, **kwargs)
 
     def chat(self, *, system: str, user: str, model: str, timeout_s: int, max_tokens: int) -> tuple[str, int]:
         client = self._client
@@ -92,7 +101,7 @@ class OpenAIProvider:
                 max_tokens=max_tokens,
                 timeout=timeout_s,
             )
-            choice = resp.choices[0].message.content or ""
+            choice = message_text(resp.choices[0].message)
             used = 0
             try:
                 used = int(resp.usage.total_tokens or 0) if resp.usage else 0
