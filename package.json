@@ -1,0 +1,5 @@
+{
+  "name": "study-monorepo",
+  "private": true,
+  "workspaces": ["apps/web", "packages/shared"]
+}

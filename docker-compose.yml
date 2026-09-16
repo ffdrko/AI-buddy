@@ -1,0 +1,61 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-study}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-study}
+      POSTGRES_DB: ${POSTGRES_DB:-study}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+
+  api:
+    build: ./apps/api
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://study:study@db:5432/study
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+      - minio
+
+  worker:
+    build: ./apps/api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+
+  web:
+    build: ./apps/web
+    env_file: .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  miniodata:

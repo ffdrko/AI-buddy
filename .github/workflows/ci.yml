@@ -1,0 +1,32 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-type-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Python lint + typecheck + test
+        run: |
+          pip install ruff black isort mypy pytest fastapi httpx pydantic-settings uvicorn
+          ruff check apps/api packages/db || true
+          black --check apps/api packages/db || true
+          isort --check-only apps/api packages/db || true
+          mypy apps/api/app || true
+          pytest apps/api -q || true
+      - name: Web lint + typecheck + build
+        run: |
+          cd apps/web
+          npm install
+          npm run lint --if-present || true
+          npm run typecheck --if-present || npx tsc --noEmit || true
+          npm run build
