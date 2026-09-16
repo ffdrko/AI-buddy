@@ -1,0 +1,18 @@
+
+> study-web@0.1.0 dev
+> next dev
+
+   ▲ Next.js 15.1.4
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.103.87:3000
+
+ ✓ Starting...
+ ✓ Ready in 2.9s
+ ○ Compiling / ...
+ ✓ Compiled / in 3.7s (616 modules)
+ GET / 200 in 4009ms
+ GET / 200 in 17ms
+ GET / 200 in 29ms
+ GET / 200 in 15ms
+ GET / 200 in 17ms
+ GET / 200 in 16ms

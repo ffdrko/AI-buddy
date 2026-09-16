@@ -188,10 +188,8 @@ class SASessionStore:
     def next_unanswered(self, session_id: str) -> dict | None:
         m = _models()
         with self.session_factory() as s:
-            answered = {r[0] for r in s.query(m.Answer.question_id).filter(m.Answer.session_id == session_id).all()}
-            q = (s.query(m.Question).filter(m.Question.session_id == session_id)
-                 .order_by(m.Question.generated_at).first())
-            # oldest-first scan to skip answered ones
+            # IDs come back as UUID objects — normalise to str for comparison.
+            answered = {str(r[0]) for r in s.query(m.Answer.question_id).filter(m.Answer.session_id == session_id).all()}
             for row in (s.query(m.Question).filter(m.Question.session_id == session_id)
                         .order_by(m.Question.generated_at).all()):
                 if str(row.id) not in answered:
