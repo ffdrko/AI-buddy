@@ -35,13 +35,13 @@ def get_store():
 def get_pipeline_deps(store=Depends(get_store)):
     from ..config import settings
     from ..ingestion.llm import EMBEDDING_DIM_DEFAULT, EMBEDDING_MODEL_DEFAULT
-    from ..ingestion.pdf_extract import default_ocr_fn
+    from ..ingestion.pdf_extract import resolve_ocr_fn
     from ..ingestion.pipeline import PipelineDeps
 
     return PipelineDeps(
         store=store,
         storage_put=_storage().put_bytes,
-        ocr_fn=default_ocr_fn,
+        ocr_fn=resolve_ocr_fn(getattr(settings, "ocr_provider", "auto")),
         embedding_model=getattr(settings, "embedding_model", EMBEDDING_MODEL_DEFAULT),
         embedding_dim=getattr(settings, "embedding_dim", EMBEDDING_DIM_DEFAULT),
     )

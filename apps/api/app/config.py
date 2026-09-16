@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     max_pages: int = 2000
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1536
+    ocr_provider: str = "auto"  # tesseract | llm | auto
+    ocr_model: str = "gpt-4o-mini"
 
 
 settings = Settings()

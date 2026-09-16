@@ -19,6 +19,7 @@ EMBEDDING_MODEL_DEFAULT = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 EMBEDDING_DIM_DEFAULT = 1536
 EMBED_BATCH_SIZE = 64
 EMBED_MAX_RETRIES = 4
+OCR_MODEL_DEFAULT = os.getenv("OCR_MODEL", "gpt-4o-mini")
 
 Concept = tuple[str, float]  # (normalised label, confidence)
 
@@ -109,3 +110,36 @@ def embed_texts(
         resp = _retry_with_backoff(_call)
         vectors.extend([d.embedding for d in resp.data])
     return vectors
+
+
+# ------------------------------------------------------------ vision OCR ---
+def transcribe_page_image(image_png: bytes, page_no: int, model: str | None = None, client=None) -> str:
+    """Transcribe a scanned page image via a vision LLM. One call per page.
+
+    Sends the PNG to the chat model and returns raw transcription text (no
+    commentary — the prompt forbids it). Requires OPENAI_API_KEY.
+    """
+    import base64
+
+    client = client or _openai_client()
+    data_url = "data:image/png;base64," + base64.b64encode(image_png).decode()
+
+    def _call():
+        resp = client.chat.completions.create(
+            model=model or OCR_MODEL_DEFAULT,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": (
+                        "Transcribe all text visible in this scanned document page. "
+                        "Return only the transcribed text, preserving reading order and "
+                        "paragraph breaks. No commentary, no markdown fences.")},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }],
+            max_tokens=4000,
+            timeout=90,
+        )
+        return resp.choices[0].message.content or ""
+
+    return _retry_with_backoff(_call).strip()

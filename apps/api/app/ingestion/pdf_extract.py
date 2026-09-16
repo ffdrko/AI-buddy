@@ -58,6 +58,13 @@ def extract_pdf_text(
     return full_text, len(pages), pages, used_ocr
 
 
+def tesseract_available() -> bool:
+    """True when the tesseract binary is on PATH."""
+    import shutil
+
+    return shutil.which("tesseract") is not None
+
+
 def default_ocr_fn(image_png: bytes, page_no: int) -> str:
     """OCR via pytesseract/tesseract when installed. Raises otherwise."""
     try:
@@ -65,9 +72,46 @@ def default_ocr_fn(image_png: bytes, page_no: int) -> str:
         import pytesseract
     except ImportError as e:
         raise RuntimeError("OCR requested but pytesseract/Pillow is not installed") from e
+    if not tesseract_available():
+        raise RuntimeError(
+            "tesseract is not installed or not on PATH. Install it (winget install UB-Mannheim.TesseractOCR) "
+            "or set OCR_PROVIDER=llm with OPENAI_API_KEY to transcribe scans via vision LLM."
+        )
     import io
 
     from PIL import Image
 
     img = Image.open(io.BytesIO(image_png))
     return pytesseract.image_to_string(img)
+
+
+def resolve_ocr_fn(preference: str | None = None):
+    """Pick the OCR function. ``OCR_PROVIDER``: tesseract | llm | auto.
+
+    auto (default): tesseract when its binary exists, else vision LLM when
+    OPENAI_API_KEY is set, else a function that raises a helpful error.
+    """
+    import os
+
+    pref = (preference or os.getenv("OCR_PROVIDER", "auto")).lower()
+    if pref == "tesseract":
+        return default_ocr_fn
+    if pref == "llm":
+        from .llm import transcribe_page_image
+
+        return transcribe_page_image
+    # auto
+    if tesseract_available():
+        return default_ocr_fn
+    if os.getenv("OPENAI_API_KEY"):
+        from .llm import transcribe_page_image
+
+        return transcribe_page_image
+
+    def _unavailable(image_png: bytes, page_no: int) -> str:
+        raise RuntimeError(
+            f"page {page_no} appears scanned and no OCR is available: install tesseract "
+            "or set OCR_PROVIDER=llm with OPENAI_API_KEY."
+        )
+
+    return _unavailable

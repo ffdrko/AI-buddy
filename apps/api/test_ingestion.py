@@ -219,3 +219,65 @@ def test_scanned_page_without_ocr_fails_cleanly():
     assert "OCR" in (res.error or "") or "scanned" in (res.error or "")
     assert store.chunks.get(up.document_id) in (None, []), "no partial chunks on failure"
     assert store.docs[up.document_id]["status"] == "failed"
+
+
+def test_scanned_page_with_ocr_succeeds():
+    from app.ingestion.pdf_extract import default_ocr_fn, resolve_ocr_fn
+
+    store = InMemoryDocumentStore()
+    fake_ocr = lambda png, page_no: "transcribed scan content " * 60  # noqa: E731
+    up = run_upload(user_id="u1", filename="scan.pdf", pdf_bytes=_make_pdf([""]), title=None, deps=_deps(store))
+    res = run_ingestion(up.document_id, _make_pdf([""]), _deps(store, ocr_fn=fake_ocr))
+    assert res.status == "ready", res.error
+    assert store.docs[up.document_id]["status"] == "ready"
+
+    assert resolve_ocr_fn("tesseract") is default_ocr_fn
+
+
+def test_ocr_provider_selection(monkeypatch):
+    import os
+
+    from app.ingestion import pdf_extract as P
+    from app.ingestion.llm import transcribe_page_image
+
+    assert P.resolve_ocr_fn("llm") is transcribe_page_image
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    fn = P.resolve_ocr_fn("auto")
+    try:
+        fn(b"img", 1)
+    except RuntimeError as e:
+        assert "no OCR is available" in str(e)
+    else:
+        raise AssertionError("expected helpful OCR error")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(P, "tesseract_available", lambda: False)
+    assert P.resolve_ocr_fn("auto") is transcribe_page_image
+    monkeypatch.setattr(P, "tesseract_available", lambda: True)
+    assert P.resolve_ocr_fn("auto") is P.default_ocr_fn
+
+
+def test_transcribe_page_image_with_fake_client():
+    from app.ingestion.llm import transcribe_page_image
+
+    class FakeMsg:
+        content = "  hello scan  "
+
+    class FakeChoice:
+        message = FakeMsg()
+
+    class FakeResp:
+        choices = [FakeChoice()]
+
+    class FakeCompletions:
+        def create(self, **kw):
+            assert kw["messages"][0]["content"][1]["type"] == "image_url"
+            assert kw["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+            return FakeResp()
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    assert transcribe_page_image(b"fakepng", 1, client=FakeClient()) == "hello scan"
