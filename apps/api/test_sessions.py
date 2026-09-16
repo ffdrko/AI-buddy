@@ -15,6 +15,8 @@ from app.sessions.service import (
     ask_tutor,
     end_session,
     get_next_question,
+    get_progress_summary,
+    get_session_summary,
     pregenerate_questions,
     rerank_candidates,
     start_session,
@@ -140,6 +142,18 @@ class FakeStore:
     def set_streak(self, *, user_id, current, longest, last_date):
         self.streak = {"current_streak": current, "longest_streak": longest, "last_study_date": last_date}
 
+    def list_sessions(self, u, limit=10):
+        return [{"id": s["id"], "document_id": s["document_id"], "status": s["status"],
+                 "planned_duration_minutes": s["planned_duration_minutes"],
+                 "started_at": None, "ended_at": None}
+                for s in self.sessions.values() if s["user_id"] == u][:limit]
+
+    def count_answers(self, sid):
+        return sum(1 for a in self.answers.values() if a["session_id"] == sid)
+
+    def get_daily_logs(self, u, since):
+        return []
+
 
 def _deps(store=None):
     store = store or FakeStore()
@@ -233,3 +247,37 @@ def test_rerank_boosts_unseen_and_due():
     now = datetime.now(timezone.utc)
     states = {"k1": {"review_count": 10, "next_due_at": now.replace(year=now.year + 1)}, "k2": {"review_count": 0, "next_due_at": None}}
     assert rerank_candidates([("k1", 0.01), ("k2", 0.05)], states, now)[0] == "k2"
+
+
+def test_end_is_idempotent_and_summary_readable():
+    deps = _deps()
+    sid = start_session(deps, user_id="u1", document_id="d1", available_minutes=10, session_goal="mixed")["session_id"]
+    q = get_next_question(deps, user_id="u1", session_id=sid)
+    submit_answer(deps, user_id="u1", session_id=sid, question_id=q["id"],
+                  response_text="photosynthesis light energy chloroplasts", selected_option_id=None, time_seconds=20)
+    first = end_session(deps, user_id="u1", session_id=sid)
+    second = end_session(deps, user_id="u1", session_id=sid)
+    assert first["questions_answered"] == second["questions_answered"] == 1
+    via_get = get_session_summary(deps, user_id="u1", session_id=sid)
+    assert via_get["questions_answered"] == 1 and via_get["status"] == "completed"
+    with pytest.raises(LookupError):
+        get_session_summary(deps, user_id="intruder", session_id=sid)
+
+
+def test_progress_summary_shape():
+    deps = _deps()
+    sid = start_session(deps, user_id="u1", document_id="d1", available_minutes=10, session_goal="mixed")["session_id"]
+    q = get_next_question(deps, user_id="u1", session_id=sid)
+    submit_answer(deps, user_id="u1", session_id=sid, question_id=q["id"],
+                  response_text="photosynthesis light energy chloroplasts", selected_option_id=None, time_seconds=20)
+    out = get_progress_summary(deps, user_id="u1")
+    assert out["streak"]["current_streak"] == 1
+    assert any(t["concept"] == "photosynthesis" for t in out["topics"])
+    assert out["recent_sessions"] and out["recent_sessions"][0]["questions_answered"] == 1
+
+
+def test_tutor_returns_displayable_sources():
+    deps = _deps()
+    out = ask_tutor(deps, user_id="u1", document_id="d1", query="What is photosynthesis?", history=[])
+    assert out["sources"], "UI needs headings/pages, not raw chunk ids"
+    assert all(s["section_heading"] for s in out["sources"])

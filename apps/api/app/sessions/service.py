@@ -232,31 +232,66 @@ def submit_answer(deps: ServiceDeps, *, user_id: str, session_id: str, question_
 
 
 # --------------------------------------------------------------- end -----
-def end_session(deps: ServiceDeps, *, user_id: str, session_id: str) -> dict:
-    session = deps.store.get_session(session_id)
-    if session is None or session["user_id"] != user_id:
-        raise LookupError("session not found")
-    if session["status"] != "active":
-        raise ValueError(f"session is {session['status']}")
-
-    now = _now()
+def compute_summary(deps: ServiceDeps, session_id: str) -> dict:
+    """Session summary derived purely from the answers log. Read-only."""
     answers = deps.store.list_answers(session_id)
     total = len(answers)
     correct = sum(1 for a in answers if (a["llm_grade"] or 0) >= deps.threshold)
     study_seconds = sum(a["time_seconds"] or 0 for a in answers)
-    started = session.get("started_at")
-    actual = int((now - started).total_seconds()) if started else study_seconds
-    deps.store.set_session_ended(session_id, ended_at=now, actual_seconds=actual)
-
     chunk_ids = {deps.store.get_question(a["question_id"])["chunk_id"]
                  for a in answers if deps.store.get_question(a["question_id"])}
     concepts = deps.store.get_chunk_concepts(sorted(chunk_ids))
     covered = sorted({c for clist in concepts.values() for c, _ in clist})
-
     return {"accuracy": round(correct / total, 3) if total else 0.0,
             "questions_answered": total, "correct_count": correct,
-            "study_time_seconds": study_seconds, "actual_duration_seconds": actual,
-            "concepts_covered": covered}
+            "study_time_seconds": study_seconds, "concepts_covered": covered}
+
+
+def end_session(deps: ServiceDeps, *, user_id: str, session_id: str) -> dict:
+    session = deps.store.get_session(session_id)
+    if session is None or session["user_id"] != user_id:
+        raise LookupError("session not found")
+    if session["status"] == "completed":
+        summary = compute_summary(deps, session_id)  # refresh-safe reread
+        summary["actual_duration_seconds"] = None
+        return summary
+    if session["status"] != "active":
+        raise ValueError(f"session is {session['status']}")
+
+    now = _now()
+    summary = compute_summary(deps, session_id)
+    started = session.get("started_at")
+    actual = int((now - started).total_seconds()) if started else summary["study_time_seconds"]
+    deps.store.set_session_ended(session_id, ended_at=now, actual_seconds=actual)
+    summary["actual_duration_seconds"] = actual
+    return summary
+
+
+def get_session_summary(deps: ServiceDeps, *, user_id: str, session_id: str) -> dict:
+    session = deps.store.get_session(session_id)
+    if session is None or session["user_id"] != user_id:
+        raise LookupError("session not found")
+    return {**compute_summary(deps, session_id), "status": session["status"]}
+
+
+def get_progress_summary(deps: ServiceDeps, *, user_id: str) -> dict:
+    """Dashboard read model: streak cache + topic states + 30d log + recents."""
+    from datetime import timedelta
+
+    streak = deps.store.get_streak(user_id)
+    topics = deps.store.get_topic_states(user_id)
+    logs = deps.store.get_daily_logs(user_id, _study_date(None) - timedelta(days=30))
+    recent = deps.store.list_sessions(user_id, limit=10)
+    for r in recent:
+        r["questions_answered"] = deps.store.count_answers(r["id"])
+    return {
+        "user_id": user_id,
+        "streak": {**streak, "last_study_date": streak["last_study_date"].isoformat()
+                   if streak["last_study_date"] else None},
+        "topics": topics,
+        "daily_logs": logs,
+        "recent_sessions": recent,
+    }
 
 
 # ------------------------------------------------------------- tutor -----
@@ -311,4 +346,6 @@ def ask_tutor(deps: ServiceDeps, *, user_id: str, document_id: str,
             user_query=query, retrieved_chunks=retrieved,
             conversation_history=[ChatTurn(role=t["role"], content=t["content"]) for t in history[-10:]]),
         provider=deps.ai_provider)
-    return {"response_text": out.response_text, "source_chunk_ids": out.source_chunk_ids, "llm_model": out.model}
+    return {"response_text": out.response_text, "source_chunk_ids": out.source_chunk_ids, "llm_model": out.model,
+            "sources": [{"chunk_id": r.chunk_id, "section_heading": r.section_heading,
+                         "page_start": r.page_start, "page_end": r.page_end} for r in retrieved]}

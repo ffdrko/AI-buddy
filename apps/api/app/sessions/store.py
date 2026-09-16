@@ -56,6 +56,10 @@ class SessionStore(Protocol):
     def upsert_daily_log(self, *, user_id: str, study_date, seconds: int, answered: int, correct: int) -> None: ...
     def get_streak(self, user_id: str) -> dict: ...
     def set_streak(self, *, user_id: str, current: int, longest: int, last_date) -> None: ...
+    # -- read models for progress/dashboard --
+    def list_sessions(self, user_id: str, limit: int = 10) -> list[dict]: ...
+    def count_answers(self, session_id: str) -> int: ...
+    def get_daily_logs(self, user_id: str, since) -> list[dict]: ...
 
 
 class SASessionStore:
@@ -338,3 +342,28 @@ class SASessionStore:
             r.last_study_date = last_date
             r.updated_at = datetime.now(timezone.utc)
             s.commit()
+
+    def list_sessions(self, user_id: str, limit: int = 10) -> list[dict]:
+        m = _models()
+        with self.session_factory() as s:
+            rows = (s.query(m.Session).filter(m.Session.user_id == user_id)
+                    .order_by(m.Session.started_at.desc()).limit(limit).all())
+            return [{"id": str(r.id), "document_id": str(r.document_id), "status": r.status,
+                     "planned_duration_minutes": r.planned_duration_minutes,
+                     "started_at": r.started_at.isoformat() if r.started_at else None,
+                     "ended_at": r.ended_at.isoformat() if r.ended_at else None} for r in rows]
+
+    def count_answers(self, session_id: str) -> int:
+        m = _models()
+        with self.session_factory() as s:
+            return s.query(m.Answer).filter(m.Answer.session_id == session_id).count()
+
+    def get_daily_logs(self, user_id: str, since) -> list[dict]:
+        m = _models()
+        with self.session_factory() as s:
+            rows = (s.query(m.DailyStudyLog)
+                    .filter(m.DailyStudyLog.user_id == user_id, m.DailyStudyLog.study_date >= since)
+                    .order_by(m.DailyStudyLog.study_date).all())
+            return [{"study_date": r.study_date.isoformat(), "total_seconds": r.total_seconds or 0,
+                     "questions_answered": r.questions_answered or 0, "correct_count": r.correct_count or 0}
+                    for r in rows]

@@ -87,3 +87,10 @@ def end_session(session_id: str, user_id: str = Depends(get_user_id), deps=Depen
     from ..sessions.service import end_session as _end
 
     return _translate(_end, deps, user_id=user_id, session_id=session_id)
+
+
+@router.get("/{session_id}/summary")
+def session_summary(session_id: str, user_id: str = Depends(get_user_id), deps=Depends(get_service_deps)):
+    from ..sessions.service import get_session_summary as _summary
+
+    return _translate(_summary, deps, user_id=user_id, session_id=session_id)
