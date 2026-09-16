@@ -8,6 +8,46 @@ function authToken(): string {
   }
 }
 
+function refreshToken(): string {
+  try {
+    return localStorage.getItem("study-refresh-token") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function storeTokens(access: string, refresh: string) {
+  try {
+    localStorage.setItem("study-token", access);
+    localStorage.setItem("study-refresh-token", refresh);
+  } catch {}
+}
+
+/** Single-flight refresh: concurrent 401s share one refresh call. */
+let refreshPromise: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      try {
+        const res = await fetch(`${BASE}/auth/refresh`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${refreshToken()}` },
+        });
+        if (!res.ok) return false;
+        const data = (await res.json()) as { access_token: string; refresh_token: string };
+        storeTokens(data.access_token, data.refresh_token);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        refreshPromise = null;
+      }
+    })();
+  }
+  return refreshPromise;
+}
+
 export type QuestionType = "mcq" | "free_text" | "true_false";
 export type SessionGoal = "reinforce" | "explore" | "weak_focus" | "mixed";
 
@@ -50,11 +90,14 @@ export interface TopicState {
   confidence: number;
 }
 
-async function req<T>(path: string, _userId: string, init?: RequestInit): Promise<T> {
+async function req<T>(path: string, _userId: string, init?: RequestInit, retried = false): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${authToken()}`, "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
+  if (res.status === 401 && !retried && !path.startsWith("/auth/")) {
+    if (await tryRefresh()) return req<T>(path, _userId, init, true);
+  }
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`${res.status} ${path}: ${body}`);
@@ -63,7 +106,7 @@ async function req<T>(path: string, _userId: string, init?: RequestInit): Promis
   return (await res.json()) as T;
 }
 
-export async function uploadDocument(_userId: string, file: File, title?: string) {
+export async function uploadDocument(_userId: string, file: File, title?: string, retried = false) {
   const form = new FormData();
   form.append("file", file);
   if (title) form.append("title", title);
@@ -72,6 +115,9 @@ export async function uploadDocument(_userId: string, file: File, title?: string
     headers: { Authorization: `Bearer ${authToken()}` },
     body: form,
   });
+  if (res.status === 401 && !retried && (await tryRefresh())) {
+    return uploadDocument(_userId, file, title, true);
+  }
   if (!res.ok) throw new Error(`${res.status} /documents/upload: ${await res.text()}`);
   return (await res.json()) as { document_id: string; status: string; deduped: boolean };
 }

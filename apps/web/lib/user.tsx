@@ -6,6 +6,7 @@ import { login, register } from "./api";
 
 const UID_KEY = "study-user-id";
 const TOKEN_KEY = "study-token";
+const REFRESH_KEY = "study-refresh-token";
 
 interface Ctx {
   userId: string | null;
@@ -43,11 +44,13 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const signIn = async (email: string, password: string, mode: "login" | "register") => {
     const res = mode === "login" ? await login(email, password) : await register(email, password);
     storageSet(TOKEN_KEY, res.access_token);
+    storageSet(REFRESH_KEY, res.refresh_token);
     storageSet(UID_KEY, res.user_id);
     setUserIdState(res.user_id);
   };
   const clear = () => {
     storageDel(TOKEN_KEY);
+    storageDel(REFRESH_KEY);
     storageDel(UID_KEY);
     setUserIdState(null);
   };
