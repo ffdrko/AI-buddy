@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     s3_endpoint_url: str = "http://minio:9000"
     s3_bucket: str = "study-raw"
     cors_origins: list[str] = ["http://localhost:3000"]
+    max_upload_mb: int = 50
+    max_pages: int = 2000
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int = 1536
 
 
 settings = Settings()
