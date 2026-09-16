@@ -60,6 +60,7 @@ class DocumentStore(Protocol):
     def add_embeddings(self, chunk_ids: list[str], vectors: list[list[float]], model_name: str, model_dim: int) -> None: ...
     def add_concepts(self, chunk_ids: list[str], concepts: list[list[Concept]]) -> None: ...
     def delete_run_artifacts(self, document_id: str) -> None: ...
+    def delete_document(self, document_id: str) -> None: ...
 
 
 @dataclass
@@ -98,8 +99,13 @@ def run_upload(
     content_hash = compute_content_hash(pdf_bytes)
     existing = deps.store.find_by_hash(content_hash)
     if existing is not None:
-        logger.info("dedupe hit hash=%s doc=%s", content_hash[:12], existing["id"])
-        return IngestionResult(document_id=str(existing["id"]), status=existing.get("status", "ready"), deduped=True)
+        if existing.get("status") == "failed":
+            # A failed row must never block a retry: drop it and start over.
+            logger.info("retry after failure hash=%s doc=%s", content_hash[:12], existing["id"])
+            deps.store.delete_document(str(existing["id"]))
+        else:
+            logger.info("dedupe hit hash=%s doc=%s", content_hash[:12], existing["id"])
+            return IngestionResult(document_id=str(existing["id"]), status=existing.get("status", "ready"), deduped=True)
     key = (storage_key_fn or raw_pdf_key)(content_hash)
     deps.storage_put(key, pdf_bytes, "application/pdf")
     doc = deps.store.create_pending(
@@ -304,5 +310,16 @@ class SADocumentStore:
             if hasattr(doc, "deleted_at"):
                 doc.deleted_at = datetime.now(timezone.utc)
             else:  # pre-0002 schema fallback: hard delete
+                s.delete(doc)
+            s.commit()
+
+    def delete_document(self, document_id: str) -> None:
+        """Hard delete a document and its artifacts (failed-retry path)."""
+        m = _models()
+        with self.session_factory() as s:
+            self.delete_run_artifacts(document_id)
+            # Re-query in this session: delete_run_artifacts uses its own session.
+            doc = s.query(m.Document).filter(m.Document.id == document_id).first()
+            if doc is not None:
                 s.delete(doc)
             s.commit()

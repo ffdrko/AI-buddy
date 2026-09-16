@@ -88,6 +88,12 @@ class InMemoryDocumentStore:
             self.embeddings.pop(c["id"], None)
             self.concepts.pop(c["id"], None)
 
+    def delete_document(self, document_id):
+        self.delete_run_artifacts(document_id)
+        doc = self.docs.pop(document_id, None)
+        if doc is not None:
+            self.by_hash.pop(doc["content_hash"], None)
+
 
 def _deps(store, **kw):
     stored: dict[str, bytes] = {}
@@ -154,6 +160,19 @@ def test_upload_dedupe_same_pdf_same_id():
     assert r1.document_id == r2.document_id
     assert r2.deduped is True
     assert store.creates == 1, "pipeline must not re-run on duplicate upload"
+
+
+def test_failed_upload_can_be_retried():
+    store = InMemoryDocumentStore()
+    pdf = _make_pdf(["hello world"])
+    r1 = run_upload(user_id="u1", filename="a.pdf", pdf_bytes=pdf, title=None, deps=_deps(store))
+    store.set_status(r1.document_id, "failed", error="tesseract is not installed")
+    r2 = run_upload(user_id="u1", filename="a.pdf", pdf_bytes=pdf, title=None, deps=_deps(store))
+    assert r2.deduped is False, "failed rows must not block retry"
+    assert r2.document_id != r1.document_id
+    assert r2.status == "pending"
+    assert store.creates == 2
+    assert r1.document_id not in store.docs
 
 
 def test_full_pipeline_ready():
