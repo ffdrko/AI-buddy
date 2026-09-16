@@ -11,5 +11,7 @@ dist/
 pgdata/
 tsconfig.tsbuildinfo
 var/
+dev.log
+.env.local
 .neon
 .env.local
