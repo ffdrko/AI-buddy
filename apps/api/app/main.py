@@ -49,8 +49,12 @@ VERSION = "0.1.0-phase0"
 app = FastAPI(title="Adaptive Study Platform API", version=VERSION)
 
 from .routers.documents import router as documents_router  # noqa: E402
+from .routers.sessions import router as sessions_router  # noqa: E402
+from .routers.tutor import router as tutor_router  # noqa: E402
 
 app.include_router(documents_router)
+app.include_router(sessions_router)
+app.include_router(tutor_router)
 
 app.add_middleware(
     CORSMiddleware,
