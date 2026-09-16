@@ -5,7 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ..routers.documents import get_user_id
+from ..auth import require_user  # noqa: F401 (guard available for non-LLM routes)
+from ..ratelimit import rate_limited
 from .sessions import get_service_deps
 
 router = APIRouter(prefix="/tutor", tags=["tutor"])
@@ -18,7 +19,7 @@ class TutorAskBody(BaseModel):
 
 
 @router.post("/ask")
-def ask(body: TutorAskBody, user_id: str = Depends(get_user_id), deps=Depends(get_service_deps)):
+def ask(body: TutorAskBody, user_id: str = Depends(rate_limited), deps=Depends(get_service_deps)):
     from ..sessions.service import ask_tutor as _ask
 
     try:

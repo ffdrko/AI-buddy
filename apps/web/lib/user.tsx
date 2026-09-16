@@ -2,41 +2,61 @@
 
 import Link from "next/link";
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { login, register } from "./api";
 
-const KEY = "study-user-id";
-const Ctx = createContext<{ userId: string | null; setUserId: (v: string) => void; clear: () => void }>({
-  userId: null,
-  setUserId: () => {},
-  clear: () => {},
-});
+const UID_KEY = "study-user-id";
+const TOKEN_KEY = "study-token";
+
+interface Ctx {
+  userId: string | null;
+  signIn: (email: string, password: string, mode: "login" | "register") => Promise<void>;
+  clear: () => void;
+}
+
+const Ctx = createContext<Ctx>({ userId: null, signIn: async () => {}, clear: () => {} });
+
+function storageGet(k: string): string | null {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(k: string, v: string) {
+  try {
+    localStorage.setItem(k, v);
+  } catch {}
+}
+
+function storageDel(k: string) {
+  try {
+    localStorage.removeItem(k);
+  } catch {}
+}
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [userId, setUserIdState] = useState<string | null>(null);
   useEffect(() => {
-    try {
-      setUserIdState(localStorage.getItem(KEY));
-    } catch {
-      setUserIdState(null);
-    }
+    if (storageGet(TOKEN_KEY)) setUserIdState(storageGet(UID_KEY));
   }, []);
-  const setUserId = (v: string) => {
-    try {
-      localStorage.setItem(KEY, v);
-    } catch {}
-    setUserIdState(v);
+  const signIn = async (email: string, password: string, mode: "login" | "register") => {
+    const res = mode === "login" ? await login(email, password) : await register(email, password);
+    storageSet(TOKEN_KEY, res.access_token);
+    storageSet(UID_KEY, res.user_id);
+    setUserIdState(res.user_id);
   };
   const clear = () => {
-    try {
-      localStorage.removeItem(KEY);
-    } catch {}
+    storageDel(TOKEN_KEY);
+    storageDel(UID_KEY);
     setUserIdState(null);
   };
-  return <Ctx.Provider value={{ userId, setUserId, clear }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ userId, signIn, clear }}>{children}</Ctx.Provider>;
 }
 
 export const useUser = () => useContext(Ctx);
 
-/** Renders children only when signed in (dev placeholder until Phase 7 JWT). */
+/** Renders children only when signed in (JWT, Phase 7). */
 export function RequireUser({ children }: { children: (userId: string) => ReactNode }) {
   const { userId } = useUser();
   if (!userId) {
@@ -44,7 +64,7 @@ export function RequireUser({ children }: { children: (userId: string) => ReactN
       <main className="container">
         <div className="card">
           <h1>Sign in</h1>
-          <p className="muted">Enter any user id to continue (dev auth — Phase 7 adds JWT).</p>
+          <p className="muted">Your session expired or you signed out.</p>
           <Link className="btn" href="/">Go to sign in</Link>
         </div>
       </main>

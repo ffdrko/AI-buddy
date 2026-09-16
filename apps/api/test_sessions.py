@@ -243,6 +243,32 @@ def test_tutor_ask_grounded_and_model_checked():
         ask_tutor(deps, user_id="u1", document_id="d1", query="hi", history=[])
 
 
+def test_concurrent_sessions_p95():
+    """Phase 7 load gate: 10 concurrent sessions, stub LLM (LLM time excluded)."""
+    import concurrent.futures
+    import time
+
+    def one(i: int) -> float:
+        deps = _deps()
+        deps.store.docs["d1"] = {**deps.store.docs["d1"], "user_id": f"u{i}"}
+        t0 = time.perf_counter()
+        sid = start_session(deps, user_id=f"u{i}", document_id="d1",
+                            available_minutes=10, session_goal="mixed")["session_id"]
+        pregenerate_questions(deps, sid, ["k1", "k2"])
+        q = get_next_question(deps, user_id=f"u{i}", session_id=sid)
+        submit_answer(deps, user_id=f"u{i}", session_id=sid, question_id=q["id"],
+                      response_text="photosynthesis light energy chloroplasts glucose mitochondria",
+                      selected_option_id=None, time_seconds=10)
+        end_session(deps, user_id=f"u{i}", session_id=sid)
+        return time.perf_counter() - t0
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+        latencies = sorted(pool.map(one, range(10)))
+    p95 = latencies[int(0.95 * (len(latencies) - 1))]
+    assert p95 < 2.0, f"p95 {p95:.3f}s exceeds 2s budget"
+    assert max(latencies) < 2.0
+
+
 def test_rerank_boosts_unseen_and_due():
     now = datetime.now(timezone.utc)
     states = {"k1": {"review_count": 10, "next_due_at": now.replace(year=now.year + 1)}, "k2": {"review_count": 0, "next_due_at": None}}

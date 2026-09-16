@@ -46,6 +46,7 @@ class User(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(Text)
+    password_hash: Mapped[str | None] = mapped_column(Text)  # Phase 7; null for pre-auth rows
     timezone: Mapped[str] = mapped_column(Text, nullable=False)  # IANA string; streak correctness
     created_at: Mapped[datetime] = now_utc()
 
@@ -266,7 +267,6 @@ class DailyStudyLog(Base):
 
 class StreakCache(Base):
     """Derived from daily_study_log. Always recomputable."""
-
     __tablename__ = "streak_cache"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -276,6 +276,21 @@ class StreakCache(Base):
     longest_streak: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     last_study_date: Mapped[date | None] = mapped_column(Date)
     updated_at: Mapped[datetime] = now_utc()
+
+
+class AiUsageLog(Base):
+    """Cost tracking (Phase 7). Append-only; aggregates queried per user/model."""
+
+    __tablename__ = "ai_usage_log"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"))
+    document_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"))
+    operation: Mapped[str] = mapped_column(Text, nullable=False)  # plan | generate | evaluate | tutor | embed
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    tokens_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = now_utc()
 
 
 __all__ = [
@@ -294,4 +309,5 @@ __all__ = [
     "Answer",
     "DailyStudyLog",
     "StreakCache",
+    "AiUsageLog",
 ]

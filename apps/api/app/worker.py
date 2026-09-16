@@ -33,3 +33,21 @@ def enqueue_ingestion(document_id: str, pdf_bytes: bytes, deps) -> str:
         logger.warning("queue unavailable (%s); running ingestion inline doc=%s", e, document_id)
         run_ingestion(document_id, pdf_bytes, deps)
         return "inline"
+
+
+def queue_position(document_id: str) -> int | None:
+    """Position of a pending document in the ingestion queue, if queued."""
+    try:
+        import redis  # type: ignore
+        from rq import Queue  # type: ignore
+
+        from .config import settings
+
+        r = redis.Redis.from_url(settings.redis_url, socket_connect_timeout=2)
+        q: Queue = Queue("ingestion", connection=r)
+        for i, job in enumerate(q.jobs):
+            if job.args and job.args[0] == document_id:
+                return i + 1
+        return None
+    except Exception:
+        return None

@@ -1,5 +1,13 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+function authToken(): string {
+  try {
+    return localStorage.getItem("study-token") ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export type QuestionType = "mcq" | "free_text" | "true_false";
 export type SessionGoal = "reinforce" | "explore" | "weak_focus" | "mixed";
 
@@ -42,10 +50,10 @@ export interface TopicState {
   confidence: number;
 }
 
-async function req<T>(path: string, userId: string, init?: RequestInit): Promise<T> {
+async function req<T>(path: string, _userId: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { "X-User-Id": userId, "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: { Authorization: `Bearer ${authToken()}`, "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   if (!res.ok) {
     const body = await res.text();
@@ -55,13 +63,13 @@ async function req<T>(path: string, userId: string, init?: RequestInit): Promise
   return (await res.json()) as T;
 }
 
-export async function uploadDocument(userId: string, file: File, title?: string) {
+export async function uploadDocument(_userId: string, file: File, title?: string) {
   const form = new FormData();
   form.append("file", file);
   if (title) form.append("title", title);
   const res = await fetch(`${BASE}/documents/upload`, {
     method: "POST",
-    headers: { "X-User-Id": userId },
+    headers: { Authorization: `Bearer ${authToken()}` },
     body: form,
   });
   if (!res.ok) throw new Error(`${res.status} /documents/upload: ${await res.text()}`);
@@ -117,6 +125,27 @@ export interface ProgressSummary {
 }
 
 export const getProgress = (u: string) => req<ProgressSummary>(`/progress/summary`, u);
+
+/** Phase 7 auth. Tokens live in localStorage; the user id is informational. */
+export async function register(email: string, password: string, timezone?: string) {
+  const res = await fetch(`${BASE}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, timezone: timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone }),
+  });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return (await res.json()) as { user_id: string; access_token: string; refresh_token: string };
+}
+
+export async function login(email: string, password: string) {
+  const res = await fetch(`${BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return (await res.json()) as { user_id: string; access_token: string; refresh_token: string };
+}
 
 /** Mastery display rule (mirrors backend): no raw % below 3 evidence. */
 export function masteryBand(t: TopicState): { band: string; showPercent: boolean } {

@@ -1,0 +1,60 @@
+# Production profile (BUILD_FLOW Phase 7). Secrets via files, never env dumps.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+services:
+  db:
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+
+  api:
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://study@pgbouncer:6432/study
+      SECRET_KEY_FILE: /run/secrets/api_secret_key
+      DB_POOL_SIZE: "5"
+      DB_POOL_MAX_OVERFLOW: "10"
+    secrets:
+      - api_secret_key
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+    restart: unless-stopped
+
+  worker:
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://study@pgbouncer:6432/study
+      SECRET_KEY_FILE: /run/secrets/api_secret_key
+    secrets:
+      - api_secret_key
+    restart: unless-stopped
+
+  pgbouncer:
+    image: edoburu/pgbouncer:1.22
+    environment:
+      DATABASES_HOST: db
+      DATABASES_PORT: "5432"
+      DATABASES_USER: study
+      DATABASES_PASSWORD_FILE: /run/secrets/postgres_password
+      DATABASES_DBNAME: study
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "20"
+    secrets:
+      - postgres_password
+    depends_on:
+      - db
+
+  web:
+    environment:
+      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-https://api.example.com}
+    restart: unless-stopped
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  api_secret_key:
+    file: ./secrets/api_secret_key.txt

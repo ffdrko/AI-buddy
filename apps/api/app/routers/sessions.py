@@ -5,7 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
-from ..routers.documents import get_user_id
+from ..auth import require_user
+from ..ratelimit import rate_limited
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -25,12 +26,11 @@ class AnswerBody(BaseModel):
 
 
 def get_session_store():
-    import os
-    import sys
-
     from sqlalchemy.orm import sessionmaker
 
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "db", "src"))
+    from ..dbpath import ensure_db_path
+
+    ensure_db_path()
     from db.session import get_engine
 
     from ..sessions.store import SASessionStore
@@ -41,8 +41,10 @@ def get_session_store():
 def get_service_deps(store=Depends(get_session_store)):
     from ..config import settings
     from ..sessions.service import ServiceDeps
+    from ..usage import SAUsageRecorder
 
-    return ServiceDeps(store=store, embedding_model=settings.embedding_model, embedding_dim=settings.embedding_dim)
+    return ServiceDeps(store=store, embedding_model=settings.embedding_model, embedding_dim=settings.embedding_dim,
+                       usage_sink=SAUsageRecorder(session_factory=store.session_factory))
 
 
 def _translate(fn, *args, **kwargs):
@@ -56,7 +58,7 @@ def _translate(fn, *args, **kwargs):
 
 @router.post("/start", status_code=201)
 def start_session(body: StartSessionBody, background: BackgroundTasks,
-                  user_id: str = Depends(get_user_id), deps=Depends(get_service_deps)):
+                  user_id: str = Depends(rate_limited), deps=Depends(get_service_deps)):
     from ..sessions.service import pregenerate_questions, start_session as _start
 
     result = _translate(_start, deps, user_id=user_id, document_id=body.document_id,
@@ -66,7 +68,7 @@ def start_session(body: StartSessionBody, background: BackgroundTasks,
 
 
 @router.get("/{session_id}/next-question")
-def next_question(session_id: str, user_id: str = Depends(get_user_id), deps=Depends(get_service_deps)):
+def next_question(session_id: str, user_id: str = Depends(rate_limited), deps=Depends(get_service_deps)):
     from ..sessions.service import get_next_question as _next
 
     return _translate(_next, deps, user_id=user_id, session_id=session_id)
@@ -74,7 +76,7 @@ def next_question(session_id: str, user_id: str = Depends(get_user_id), deps=Dep
 
 @router.post("/{session_id}/answer")
 def answer(session_id: str, body: AnswerBody,
-           user_id: str = Depends(get_user_id), deps=Depends(get_service_deps)):
+           user_id: str = Depends(rate_limited), deps=Depends(get_service_deps)):
     from ..sessions.service import submit_answer as _answer
 
     return _translate(_answer, deps, user_id=user_id, session_id=session_id, question_id=body.question_id,
@@ -83,14 +85,14 @@ def answer(session_id: str, body: AnswerBody,
 
 
 @router.post("/{session_id}/end")
-def end_session(session_id: str, user_id: str = Depends(get_user_id), deps=Depends(get_service_deps)):
+def end_session(session_id: str, user_id: str = Depends(require_user), deps=Depends(get_service_deps)):
     from ..sessions.service import end_session as _end
 
     return _translate(_end, deps, user_id=user_id, session_id=session_id)
 
 
 @router.get("/{session_id}/summary")
-def session_summary(session_id: str, user_id: str = Depends(get_user_id), deps=Depends(get_service_deps)):
+def session_summary(session_id: str, user_id: str = Depends(require_user), deps=Depends(get_service_deps)):
     from ..sessions.service import get_session_summary as _summary
 
     return _translate(_summary, deps, user_id=user_id, session_id=session_id)

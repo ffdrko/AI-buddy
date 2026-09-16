@@ -183,9 +183,9 @@ def _map_chunks_to_pages(chunks: list[Chunk], pages) -> dict[int, tuple[int | No
 # NOTE: implemented with a local import so `app.ingestion` stays importable
 # without the db package on sys.path (tests use InMemoryDocumentStore).
 def _models():
-    import sys, os
+    from ..dbpath import ensure_db_path
 
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "db", "src"))
+    ensure_db_path()
     from db import models as m
 
     return m

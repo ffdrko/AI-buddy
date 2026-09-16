@@ -48,15 +48,19 @@ VERSION = "0.1.0-phase0"
 
 app = FastAPI(title="Adaptive Study Platform API", version=VERSION)
 
+from .routers.auth import router as auth_router  # noqa: E402
 from .routers.documents import router as documents_router  # noqa: E402
 from .routers.progress import router as progress_router  # noqa: E402
 from .routers.sessions import router as sessions_router  # noqa: E402
 from .routers.tutor import router as tutor_router  # noqa: E402
+from .routers.usage import router as usage_router  # noqa: E402
 
+app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(sessions_router)
 app.include_router(tutor_router)
 app.include_router(progress_router)
+app.include_router(usage_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -66,10 +70,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from .request_context import RequestContextMiddleware, log_error  # noqa: E402
+
+app.add_middleware(RequestContextMiddleware)
+
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    logger.error("unhandled error path=%s err=%s", request.url.path, exc, exc_info=True)
+    log_error("unhandled error path=%s err=%s", request.url.path, exc, exc_info=True)
     return JSONResponse(status_code=500, content={"detail": "internal server error"})
 
 

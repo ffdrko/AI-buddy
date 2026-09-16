@@ -1,22 +1,14 @@
-"""Document endpoints (BUILD_FLOW Phase 2).
-
-Auth placeholder: user id comes from the ``X-User-Id`` header until Phase 7
-JWT lands. Documents are always scoped to the calling user.
-"""
+"""Document endpoints. JWT-guarded; documents scoped to the calling user."""
 
 from __future__ import annotations
 
 from functools import lru_cache
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+
+from ..auth import require_user
 
 router = APIRouter(prefix="/documents", tags=["documents"])
-
-
-def get_user_id(x_user_id: str | None = Header(default=None)) -> str:
-    if not x_user_id:
-        raise HTTPException(status_code=401, detail="missing X-User-Id (auth lands in Phase 7)")
-    return x_user_id
 
 
 @lru_cache(maxsize=1)
@@ -27,12 +19,11 @@ def _storage():
 
 
 def get_store():
+    from ..dbpath import ensure_db_path
     from ..ingestion.pipeline import SADocumentStore
     from ..storage import build_storage_from_env  # noqa: F401
 
-    import sys, os
-
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "db", "src"))
+    ensure_db_path()
     from db.session import get_engine
     from sqlalchemy.orm import sessionmaker
 
@@ -61,7 +52,7 @@ async def upload_document(
     background: BackgroundTasks,
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
-    user_id: str = Depends(get_user_id),
+    user_id: str = Depends(require_user),
     deps=Depends(get_pipeline_deps),
 ):
     from ..ingestion.pipeline import run_ingestion, run_upload
@@ -81,16 +72,21 @@ async def upload_document(
 
 
 @router.get("/{document_id}/status")
-def document_status(document_id: str, user_id: str = Depends(get_user_id), store=Depends(get_store)):
+def document_status(document_id: str, user_id: str = Depends(require_user), store=Depends(get_store)):
     doc = store.get(document_id)
     if doc is None or doc["user_id"] != user_id:
         raise HTTPException(status_code=404, detail="document not found")
+    position = None
+    if doc["status"] == "pending":
+        from ..worker import queue_position
+
+        position = queue_position(document_id)
     return {"document_id": document_id, "status": doc["status"],
-            "error_message": doc.get("error_message"), "queue_position": None}
+            "error_message": doc.get("error_message"), "queue_position": position}
 
 
 @router.get("/{document_id}")
-def get_document(document_id: str, user_id: str = Depends(get_user_id), store=Depends(get_store)):
+def get_document(document_id: str, user_id: str = Depends(require_user), store=Depends(get_store)):
     doc = store.get(document_id)
     if doc is None or doc["user_id"] != user_id:
         raise HTTPException(status_code=404, detail="document not found")
@@ -98,12 +94,12 @@ def get_document(document_id: str, user_id: str = Depends(get_user_id), store=De
 
 
 @router.get("")
-def list_documents(user_id: str = Depends(get_user_id), store=Depends(get_store)):
+def list_documents(user_id: str = Depends(require_user), store=Depends(get_store)):
     return {"documents": store.list_for_user(user_id)}
 
 
 @router.delete("/{document_id}", status_code=204)
-def delete_document(document_id: str, user_id: str = Depends(get_user_id), store=Depends(get_store)):
+def delete_document(document_id: str, user_id: str = Depends(require_user), store=Depends(get_store)):
     doc = store.get(document_id)
     if doc is None or doc["user_id"] != user_id:
         raise HTTPException(status_code=404, detail="document not found")

@@ -30,6 +30,18 @@ class ServiceDeps:
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1536
     threshold: float = 0.6
+    usage_sink: Any = None  # callable(entry) — Phase 7 cost tracking
+
+
+def _record(deps: ServiceDeps, *, user_id: str, operation: str, model: str,
+            tokens_used: int, session_id: str | None = None, document_id: str | None = None) -> None:
+    if deps.usage_sink is None:
+        return
+    try:
+        deps.usage_sink({"user_id": user_id, "session_id": session_id, "document_id": document_id,
+                         "operation": operation, "model": model, "tokens_used": tokens_used})
+    except Exception as e:  # noqa: BLE001 - usage must never break the loop
+        logger.warning("usage record failed op=%s err=%s", operation, e)
 
 
 def _now() -> datetime:
@@ -73,6 +85,8 @@ def start_session(deps: ServiceDeps, *, user_id: str, document_id: str,
         available_minutes=available_minutes, session_goal=session_goal), provider=deps.ai_provider)
 
     session = deps.store.create_session(user_id=user_id, document_id=document_id, planned_minutes=available_minutes)
+    _record(deps, user_id=user_id, operation="plan", model=plan.model, tokens_used=plan.tokens_used,
+            session_id=session["id"], document_id=document_id)
     return {"session_id": session["id"], "estimated_duration_minutes": plan.estimated_duration_minutes,
             "recommended_chunk_ids": plan.recommended_chunk_ids}
 
@@ -84,6 +98,7 @@ def pregenerate_questions(deps: ServiceDeps, session_id: str, chunk_ids: list[st
 
     ids: list[str] = []
     by_id = deps.store.get_chunks_by_ids(chunk_ids)
+    session = deps.store.get_session(session_id) or {}
     for i, cid in enumerate(chunk_ids[:n]):
         chunk = by_id.get(cid)
         if chunk is None:
@@ -100,6 +115,8 @@ def pregenerate_questions(deps: ServiceDeps, session_id: str, chunk_ids: list[st
                 options=[o.model_dump() for o in q.options] if q.options else None,
                 correct_option_id=q.correct_option_id, rubric_chunk_ids=q.rubric_chunk_ids, llm_model=q.model)
             ids.append(row["id"])
+            _record(deps, user_id=session.get("user_id", ""), operation="generate", model=q.model,
+                    tokens_used=q.tokens_used, session_id=session_id)
         except Exception as e:  # noqa: BLE001 - pregen must not block the session
             logger.warning("pregen failed session=%s chunk=%s err=%s", session_id, cid, e)
     return ids
@@ -144,6 +161,8 @@ def get_next_question(deps: ServiceDeps, *, user_id: str, session_id: str) -> di
         session_id=session_id, chunk_id=chunk["chunk_id"], question_text=q.question_text,
         question_type=q.question_type, options=[o.model_dump() for o in q.options] if q.options else None,
         correct_option_id=q.correct_option_id, rubric_chunk_ids=q.rubric_chunk_ids, llm_model=q.model)["id"]
+    _record(deps, user_id=user_id, operation="generate", model=q.model, tokens_used=q.tokens_used,
+            session_id=session_id, document_id=session["document_id"])
     created = deps.store.get_question(row_id)
     assert created is not None
     return public_question(deps, created)
@@ -186,6 +205,8 @@ def submit_answer(deps: ServiceDeps, *, user_id: str, session_id: str, question_
         threshold=deps.threshold, provider=deps.ai_provider)
     deps.store.set_answer_grade(answer["id"], grade=evaluation.grade, feedback=evaluation.feedback,
                                 model=evaluation.model, graded_at=now)
+    _record(deps, user_id=user_id, operation="evaluate", model=evaluation.model, tokens_used=evaluation.tokens_used,
+            session_id=session_id, document_id=session["document_id"])
 
     # Learning Engine projections (backend logic owns the writes).
     concepts = deps.store.get_chunk_concepts([question["chunk_id"]]).get(question["chunk_id"], [])
@@ -346,6 +367,8 @@ def ask_tutor(deps: ServiceDeps, *, user_id: str, document_id: str,
             user_query=query, retrieved_chunks=retrieved,
             conversation_history=[ChatTurn(role=t["role"], content=t["content"]) for t in history[-10:]]),
         provider=deps.ai_provider)
+    _record(deps, user_id=user_id, operation="tutor", model=out.model, tokens_used=out.tokens_used,
+            document_id=document_id)
     return {"response_text": out.response_text, "source_chunk_ids": out.source_chunk_ids, "llm_model": out.model,
             "sources": [{"chunk_id": r.chunk_id, "section_heading": r.section_heading,
                          "page_start": r.page_start, "page_end": r.page_end} for r in retrieved]}

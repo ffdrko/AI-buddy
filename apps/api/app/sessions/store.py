@@ -14,7 +14,9 @@ from typing import Any, Protocol
 
 
 def _models():
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "db", "src"))
+    from ..dbpath import ensure_db_path
+
+    ensure_db_path()
     from db import models as m
 
     return m
@@ -60,6 +62,14 @@ class SessionStore(Protocol):
     def list_sessions(self, user_id: str, limit: int = 10) -> list[dict]: ...
     def count_answers(self, session_id: str) -> int: ...
     def get_daily_logs(self, user_id: str, since) -> list[dict]: ...
+    # -- cost tracking (Phase 7) --
+    def log_usage(self, *, user_id: str, session_id: str | None, document_id: str | None,
+                  operation: str, model: str, tokens_used: int) -> None: ...
+    def get_usage(self, user_id: str) -> list[dict]: ...
+    # -- background jobs (Phase 7) --
+    def list_user_ids(self) -> list[str]: ...
+    def get_all_study_dates(self, user_id: str) -> list: ...
+    def embedding_model_counts(self) -> dict[str, int]: ...
 
 
 class SASessionStore:
@@ -367,3 +377,38 @@ class SASessionStore:
             return [{"study_date": r.study_date.isoformat(), "total_seconds": r.total_seconds or 0,
                      "questions_answered": r.questions_answered or 0, "correct_count": r.correct_count or 0}
                     for r in rows]
+
+    def log_usage(self, *, user_id: str, session_id: str | None, document_id: str | None,
+                  operation: str, model: str, tokens_used: int) -> None:
+        m = _models()
+        with self.session_factory() as s:
+            s.add(m.AiUsageLog(user_id=user_id, session_id=session_id, document_id=document_id,
+                               operation=operation, model=model, tokens_used=tokens_used))
+            s.commit()
+
+    def get_usage(self, user_id: str) -> list[dict]:
+        m = _models()
+        with self.session_factory() as s:
+            rows = (s.query(m.AiUsageLog).filter(m.AiUsageLog.user_id == user_id)
+                    .order_by(m.AiUsageLog.created_at).all())
+            return [{"operation": r.operation, "model": r.model, "tokens_used": r.tokens_used or 0,
+                     "session_id": str(r.session_id) if r.session_id else None} for r in rows]
+
+    def list_user_ids(self) -> list[str]:
+        m = _models()
+        with self.session_factory() as s:
+            return [str(r[0]) for r in s.query(m.User.id).all()]
+
+    def get_all_study_dates(self, user_id: str) -> list:
+        m = _models()
+        with self.session_factory() as s:
+            return [r[0] for r in s.query(m.DailyStudyLog.study_date)
+                    .filter(m.DailyStudyLog.user_id == user_id).all()]
+
+    def embedding_model_counts(self) -> dict[str, int]:
+        m = _models()
+        from sqlalchemy import func
+
+        with self.session_factory() as s:
+            return {model: count for model, count in
+                    s.query(m.Embedding.model_name, func.count(m.Embedding.id)).group_by(m.Embedding.model_name).all()}
